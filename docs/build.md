@@ -2,14 +2,14 @@
 
 ## Ubuntu desktop
 
-Target Ubuntu 24.04 on x86-64. Install Python 3.11 or newer, pip, PyQt5 (`python3-pyqt5`), and the Debian packaging tools. From the repository root, install the hash-pinned PDF engine, then launch the app.
+Target Ubuntu 24.04 on x86-64. Install Python 3.11 or newer, pip, PyQt5 (`python3-pyqt5`), `build-essential`, `curl`, `patch`, and the Debian packaging tools. From the repository root, install the hash-pinned Python bindings and build the installer with the patched native library.
 
 ```sh
 python3 -m pip --isolated install --index-url https://pypi.org/simple --only-binary=:all: --no-deps --require-hashes --target .runtime -r requirements-linux-amd64.txt
-./launch-paperwork
+./packaging/build-deb
 ```
 
-Install `build-essential`, `curl`, and `patch` to build the native library and installer. Run `/usr/bin/python3 -m tests.smoke` with `python3-pil` installed. Build the installer with `./packaging/build-deb`. The script compiles the patched MuPDF library and writes the package to `dist/`.
+The script writes the package to `dist/`. Follow the [installation guide](install.md) to install it. For workspace smoke tests, run `/usr/bin/python3 -m tests.smoke` with `python3-pil` installed.
 
 ## Android
 
