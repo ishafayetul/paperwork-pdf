@@ -1,0 +1,55 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+
+if [ "$(dpkg --print-architecture)" != amd64 ] || [ ! -d .runtime/pymupdf_lite-2.2.dist-info ]; then
+    printf '%s\n' 'Build on amd64 with the pinned runtime installed. See docs/build.md.' >&2
+    exit 1
+fi
+
+mupdf=.runtime/mupdf-1.28.6-paperwork/libmupdf.so.28.6
+if [ ! -f "$mupdf" ]; then
+    ./packaging/build-mupdf
+fi
+
+mkdir -p dist
+stage=$(mktemp -d dist/.deb-build.XXXXXXXX)
+trap 'rm -rf -- "$stage"' EXIT
+build_root="$stage/root"
+install -d -m 0755 "$build_root"
+app_dir="$build_root/usr/lib/paperwork-pdf"
+icons="$build_root/usr/share/icons/hicolor/scalable/apps"
+docs="$build_root/usr/share/doc/paperwork-pdf"
+mkdir -p "$app_dir/paperwork" "$app_dir/.runtime" "$icons" "$docs" "$build_root/DEBIAN" \
+    "$build_root/usr/bin" "$build_root/usr/share/applications"
+
+install -m 0644 paperwork/*.py "$app_dir/paperwork"
+install -m 0755 launch-paperwork "$app_dir/launch-paperwork"
+ln -s ../lib/paperwork-pdf/launch-paperwork "$build_root/usr/bin/paperwork-pdf"
+cp -r .runtime/pymupdf .runtime/pymupdf_lite-2.2.dist-info "$app_dir/.runtime/"
+install -m 0644 "$mupdf" "$app_dir/.runtime/pymupdf/libmupdf.so.28.6"
+find "$app_dir/.runtime" -type d -name __pycache__ -prune -exec rm -rf -- '{}' +
+install -m 0644 packaging/paperwork-pdf.desktop "$build_root/usr/share/applications/"
+install -m 0644 branding/paperwork.svg "$icons/paperwork-pdf.svg"
+install -m 0644 LICENSE THIRD_PARTY_NOTICES.md packaging/mupdf-third-party-notices.txt "$docs/"
+install -m 0644 .runtime/pymupdf_lite-2.2.dist-info/COPYING "$docs/PyMuPDF-COPYING"
+
+cat > "$build_root/DEBIAN/control" <<'EOF'
+Package: paperwork-pdf
+Version: 1.0.1
+Section: office
+Priority: optional
+Architecture: amd64
+Maintainer: Paperwork <35392326+ishafayetul@users.noreply.github.com>
+Homepage: https://github.com/ishafayetul/paperwork-pdf
+Depends: python3 (>= 3.11), python3-pyqt5, libstdc++6, libgcc-s1, libc6 (>= 2.38)
+Recommends: fonts-lato
+Description: Offline graphical PDF editor and converter
+ Merge, split, compress, organize, crop, annotate, convert and protect PDF
+ files locally from a native desktop tool library.
+EOF
+
+name=paperwork-pdf_1.0.1_amd64.deb
+dpkg-deb --root-owner-group --build "$build_root" "$stage/$name"
+dpkg-deb --info "$stage/$name" >/dev/null
+mv "$stage/$name" "dist/$name"

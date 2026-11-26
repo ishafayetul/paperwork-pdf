@@ -1,0 +1,56 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")"
+platform=${PAPERWORK_PLATFORM_JAR:-.work/platform/android-35/android.jar}
+tools=${PAPERWORK_ANDROID_TOOLS:-.work/build-tools/android-15}
+mupdf=.work/mupdf-1.28.6-paperwork
+
+mkdir -p .work ../dist
+if [ ! -f "$mupdf/fitz.jar" ]; then
+    ./build-mupdf
+fi
+if [ ! -f "$platform" ] || [ ! -x "$tools/aapt2" ]; then
+    printf '%s\n' 'Use Android SDK platform 35 and Android Build Tools 35. See android/README.md.' >&2
+    exit 1
+fi
+
+stage=$(mktemp -d .work/build.XXXXXXXX)
+mkdir "$stage/classes" "$stage/dex" "$stage/package" "$stage/assets"
+install -m 0644 assets/* ../LICENSE ../packaging/mupdf-third-party-notices.txt "$stage/assets/"
+install -m 0644 "$mupdf/COPYING" "$stage/assets/mupdf-copying.txt"
+javac -encoding UTF-8 -source 11 -target 11 -Xlint:-options -cp "$platform:$mupdf/fitz.jar" \
+    -d "$stage/classes" src/org/paperwork/mobile/*.java
+jar --create --file "$stage/app.jar" -C "$stage/classes" .
+"$tools/d8" --release --min-api 28 --lib "$platform" --output "$stage/dex" "$stage/app.jar" "$mupdf/fitz.jar"
+
+"$tools/aapt2" compile --dir res -o "$stage/resources.zip"
+"$tools/aapt2" link -I "$platform" --manifest AndroidManifest.xml -A "$stage/assets" \
+    -o "$stage/unsigned.apk" "$stage/resources.zip"
+stage=$(realpath "$stage")
+cp "$stage"/dex/classes*.dex "$stage/package/"
+mkdir "$stage/package/lib"
+for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+    install -D -m 0644 "$mupdf/libs/$abi/libmupdf_java.so" "$stage/package/lib/$abi/libmupdf_java.so"
+done
+(
+    cd "$stage/package"
+    zip -q -9 -r "$stage/unsigned.apk" classes*.dex lib
+)
+"$tools/zipalign" -P 16 -f 4 "$stage/unsigned.apk" "$stage/aligned.apk"
+
+key_dir=.work/signing
+if [ ! -f "$key_dir/paperwork.p12" ]; then
+    (umask 077
+     mkdir -p "$key_dir"
+     openssl rand -hex 32 > "$key_dir/pass"
+     keytool -genkeypair -storetype PKCS12 -keystore "$key_dir/paperwork.p12" -alias paperwork \
+        -storepass:file "$key_dir/pass" -keyalg RSA -keysize 3072 -validity 10000 \
+        -dname 'CN=Paperwork Mobile Local Build' >/dev/null)
+fi
+
+"$tools/apksigner" sign --ks "$key_dir/paperwork.p12" --ks-key-alias paperwork \
+    --ks-pass "file:$key_dir/pass" --out "$stage/paperwork.apk" "$stage/aligned.apk"
+"$tools/apksigner" verify --verbose "$stage/paperwork.apk"
+"$tools/zipalign" -c -P 16 4 "$stage/paperwork.apk"
+mv "$stage/paperwork.apk" ../dist/paperwork-android-1.0.1.apk
+sha256sum ../dist/paperwork-android-1.0.1.apk

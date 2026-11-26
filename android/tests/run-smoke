@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+platform=${PAPERWORK_PLATFORM_JAR:-.work/platform/android-35/android.jar}
+tools=${PAPERWORK_ANDROID_TOOLS:-.work/build-tools/android-15}
+adb=${PAPERWORK_ADB:-.work/platform-tools/adb}
+stage=$(mktemp -d .work/test.XXXXXXXX)
+mkdir "$stage/classes" "$stage/dex"
+apk=../dist/paperwork-android-1.0.1.apk
+cp .work/mupdf-1.28.6-paperwork/fitz.jar "$stage/fitz.jar"
+javac -encoding UTF-8 -source 11 -target 11 -Xlint:-options -cp "$platform:$stage/fitz.jar" \
+    -d "$stage/classes" src/org/paperwork/mobile/ScanImage.java src/org/paperwork/mobile/ScanMath.java src/org/paperwork/mobile/PdfTools.java tests/MobileCheck.java
+jar --create --file "$stage/test.jar" -C "$stage/classes" org/paperwork/mobile/MobileCheck.class
+"$tools/d8" --release --min-api 28 --lib "$platform" --output "$stage/dex" "$stage/test.jar"
+cat > "$stage/AndroidManifest.xml" <<'XML'
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.paperwork.mobile.qa">
+    <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35"/>
+    <application android:hasCode="true"/>
+    <instrumentation android:name="org.paperwork.mobile.MobileCheck" android:targetPackage="org.paperwork.mobile"/>
+</manifest>
+XML
+"$tools/aapt2" link -I "$platform" --manifest "$stage/AndroidManifest.xml" -o "$stage/unsigned.apk"
+stage=$(realpath "$stage")
+(cd "$stage/dex" && zip -q "$stage/unsigned.apk" classes.dex)
+"$tools/zipalign" -f 4 "$stage/unsigned.apk" "$stage/aligned.apk"
+"$tools/apksigner" sign --ks .work/signing/paperwork.p12 --ks-key-alias paperwork \
+    --ks-pass file:.work/signing/pass --out "$stage/test.apk" "$stage/aligned.apk"
+"$adb" -s "${PAPERWORK_SERIAL:-emulator-5564}" install -r "$apk"
+"$adb" -s "${PAPERWORK_SERIAL:-emulator-5564}" install -r "$stage/test.apk"
+"$adb" -s "${PAPERWORK_SERIAL:-emulator-5564}" shell am instrument -w org.paperwork.mobile.qa/org.paperwork.mobile.MobileCheck > "$stage/report.txt"
+cat "$stage/report.txt"
+rg -q 'checks=Scanner geometry, filters and PDF plus all 13 PDF tools passed' "$stage/report.txt"

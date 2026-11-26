@@ -1,0 +1,5 @@
+Paperwork Mobile
+MuPDF 1.28.6 with the Android Java/JNI bindings by Artifex Software, Inc.
+GNU Affero General Public License, version 3
+https://github.com/ishafayetul/paperwork-pdf/releases/latest
+https://github.com/ArtifexSoftware/mupdf-downloads/releases/tag/1.28.6

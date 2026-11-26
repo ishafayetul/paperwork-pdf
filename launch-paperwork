@@ -1,0 +1,15 @@
+#!/usr/bin/python3 -Es
+import sys
+from pathlib import Path
+
+root = Path(__file__).resolve().parent
+if not (root / ".runtime" / "pymupdf").is_dir():
+    sys.exit("PDF runtime missing. See docs/build.md for the setup command.")
+try:
+    from paperwork.app import main
+except ModuleNotFoundError as error:
+    if error.name == "PyQt5":
+        sys.exit("Qt is missing. Install the python3-pyqt5 system package.")
+    raise
+
+sys.exit(main(sys.argv[1:]))

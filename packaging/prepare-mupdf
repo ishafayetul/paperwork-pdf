@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+out=$(realpath "$1")
+cd "$(dirname "$0")/.."
+
+mkdir -p .runtime
+archive=.runtime/mupdf-1.28.6-source.tar.gz
+if [ ! -f "$archive" ]; then
+    curl -fsSL --retry 2 \
+        'https://github.com/ArtifexSoftware/mupdf-downloads/releases/download/1.28.6/mupdf-1.28.6-source.tar.gz' \
+        -o "$archive.part"
+    mv "$archive.part" "$archive"
+fi
+printf '%s  %s\n' 'dc85000640a45d90ca9b77b061f6ca67cce0c4d4fbecf8819647baf573eef101' "$archive" | sha256sum -c
+
+tar -xzf "$archive" -C "$out"
+src="$out/mupdf-1.28.6-source"
+patch --batch --forward --fuzz=0 -d "$src/thirdparty/freetype" -p1 < packaging/patches/freetype-CVE-2026-50811.patch
+patch --batch --forward --fuzz=0 -d "$src/thirdparty/freetype" -p1 < packaging/patches/freetype-CVE-2026-95512.patch
+patch --batch --forward --fuzz=0 -d "$src" -p1 < packaging/patches/mupdf-CVE-2026-112036.patch

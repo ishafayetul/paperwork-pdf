@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Paperwork
+Comment=Edit, convert and organize PDFs on your computer
+Exec=paperwork-pdf %f
+Icon=paperwork-pdf
+Terminal=false
+Categories=Office;
+MimeType=application/pdf;
+Keywords=PDF;Merge;Split;Compress;Crop;Convert;
+StartupNotify=true
