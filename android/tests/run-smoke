@@ -6,7 +6,7 @@ tools=${PAPERWORK_ANDROID_TOOLS:-.work/build-tools/android-15}
 adb=${PAPERWORK_ADB:-.work/platform-tools/adb}
 stage=$(mktemp -d .work/test.XXXXXXXX)
 mkdir "$stage/classes" "$stage/dex"
-apk=../dist/paperwork-android-1.0.1.apk
+apk=../dist/paperwork-android-1.0.2.apk
 cp .work/mupdf-1.28.6-paperwork/fitz.jar "$stage/fitz.jar"
 javac -encoding UTF-8 -source 11 -target 11 -Xlint:-options -cp "$platform:$stage/fitz.jar" \
     -d "$stage/classes" src/org/paperwork/mobile/ScanImage.java src/org/paperwork/mobile/ScanMath.java src/org/paperwork/mobile/PdfTools.java tests/MobileCheck.java

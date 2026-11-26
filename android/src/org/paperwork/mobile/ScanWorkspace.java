@@ -91,6 +91,27 @@ final class ScanWorkspace {
         }
     }
 
+    void newScan() {
+        if (scans.isEmpty()) {
+            show();
+            return;
+        }
+        new AlertDialog.Builder(app).setTitle("Start a new scan?")
+                .setMessage("This discards the pages in your current scan draft. Any exported PDFs will be kept.")
+                .setNegativeButton("Cancel", null).setPositiveButton("Discard draft", (dialog, which) -> {
+                    List<Scan> previous = new ArrayList<>(scans);
+                    scans.clear();
+                    if (!persist()) {
+                        scans.addAll(previous);
+                        return;
+                    }
+                    selected = 0;
+                    cropping = false;
+                    for (Scan page : previous) page.photo.delete();
+                    show();
+                }).show();
+    }
+
     void show() {
         app.screen = cameraWorkspace ? "scan" : "photos";
         LinearLayout body = app.screen(cameraWorkspace ? "Document scanner" : "Images to PDF",
@@ -105,6 +126,10 @@ final class ScanWorkspace {
         }
         body.addView(add);
         Ui.gap(body, 13);
+        if (cameraWorkspace && !scans.isEmpty()) {
+            body.addView(app.neutral("New scan", this::newScan));
+            Ui.gap(body, 8);
+        }
         if (scans.isEmpty()) {
             app.empty(body, cameraWorkspace ? "scan" : "photos", "Add your first page",
                     cameraWorkspace ? "Use your camera or choose photos from your device."
@@ -313,7 +338,7 @@ final class ScanWorkspace {
     }
 
     private void makePdf(int quality) {
-        app.makeOutput(cameraWorkspace ? "paperwork-scan.pdf" : "paperwork-images.pdf", "application/pdf", output -> {
+        app.makeOutput(cameraWorkspace ? "paperwork-scan.pdf" : "paperwork-images.pdf", MainActivity.PDF_MIME, output -> {
             int dimension = new int[]{1400, 2000, 2600}[quality];
             int jpeg = new int[]{70, 86, 94}[quality];
             PDFDocument document = new PDFDocument();

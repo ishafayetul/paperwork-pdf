@@ -52,5 +52,5 @@ fi
     --ks-pass "file:$key_dir/pass" --out "$stage/paperwork.apk" "$stage/aligned.apk"
 "$tools/apksigner" verify --verbose "$stage/paperwork.apk"
 "$tools/zipalign" -c -P 16 4 "$stage/paperwork.apk"
-mv "$stage/paperwork.apk" ../dist/paperwork-android-1.0.1.apk
-sha256sum ../dist/paperwork-android-1.0.1.apk
+mv "$stage/paperwork.apk" ../dist/paperwork-android-1.0.2.apk
+sha256sum ../dist/paperwork-android-1.0.2.apk

@@ -5,10 +5,14 @@ import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.Intent;
+import android.content.UriPermission;
+import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.DocumentsContract;
 import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
@@ -25,7 +29,9 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -36,6 +42,7 @@ import java.util.function.Consumer;
 public final class MainActivity extends Activity {
     static final int CAPTURE = 40, PICK_IMAGES = 41, PICK_PDF = 42, SAVE_AS = 43, PICK_ORIGINALS = 44,
             PICK_STAMP = 45;
+    static final String PDF_MIME = "application/pdf";
 
     interface Exporter { String write(File file) throws IOException; }
 
@@ -45,7 +52,7 @@ public final class MainActivity extends Activity {
     private ScrollView scroll;
     private PagePreview activePreview;
     private int previewEpoch;
-    private String cameraName, pendingMessage;
+    private String cameraName, pendingMessage, pendingMime;
     private File pending;
     private boolean busy;
     private volatile boolean destroyed;
@@ -67,10 +74,12 @@ public final class MainActivity extends Activity {
             String file = state.getString("pending");
             if (file != null && file.matches("export-[0-9]+\\.tmp")) pending = new File(getCacheDir(), file);
             pendingMessage = state.getString("message");
+            pendingMime = state.getString("mime");
             screen = state.getString("screen", "home");
         }
         if ("scan".equals(screen)) scanner.show();
         else if ("photos".equals(screen)) photos.show();
+        else if ("saved".equals(screen)) savedPdfs();
         else if ("pdf".equals(screen) && state != null && state.getInt("tool", -1) >= 0) {
             pdf.start(state.getInt("tool"));
         } else home();
@@ -81,6 +90,7 @@ public final class MainActivity extends Activity {
         out.putString("screen", screen);
         out.putString("camera", cameraName);
         out.putString("message", pendingMessage);
+        out.putString("mime", pendingMime);
         if (pending != null) out.putString("pending", pending.getName());
         out.putInt("tool", pdf.tool);
     }
@@ -105,9 +115,12 @@ public final class MainActivity extends Activity {
         detail.setLineSpacing(dp(3), 1f);
         words.addView(detail);
         Ui.gap(words, 15);
-        TextView begin = Ui.button(this, scanner.scans.isEmpty() ? "Start scanning" : "Continue scan",
-                Ui.LIME, 0xff172f1d, scanner::show);
-        words.addView(begin, new LinearLayout.LayoutParams(-2, -2));
+        words.addView(Ui.button(this, "New scan", Ui.LIME, 0xff172f1d, scanner::newScan),
+                new LinearLayout.LayoutParams(-2, -2));
+        if (!scanner.scans.isEmpty()) {
+            Ui.gap(words, 6);
+            words.addView(neutral("Continue scan", scanner::show), new LinearLayout.LayoutParams(-2, -2));
+        }
         hero.addView(words);
         body.addView(hero);
         Ui.gap(body, 21);
@@ -126,6 +139,39 @@ public final class MainActivity extends Activity {
             body.addView(row);
             Ui.gap(body, 8);
         }
+    }
+
+    private void savedPdfs() {
+        screen = "saved";
+        LinearLayout body = screen("Saved PDFs", "");
+        work("Finding saved PDFs…", () -> {
+            List<UriPermission> grants = new ArrayList<>(getContentResolver().getPersistedUriPermissions());
+            grants.sort(Comparator.comparingLong(UriPermission::getPersistedTime).reversed());
+            // Only successful PDF exports retain a read grant.
+            LinkedHashMap<Uri, String> documents = new LinkedHashMap<>();
+            for (UriPermission grant : grants) {
+                if (!grant.isReadPermission()) continue;
+                Uri uri = grant.getUri();
+                try (Cursor cursor = getContentResolver().query(uri,
+                        new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                    if (cursor != null && cursor.moveToFirst()) {
+                        String name = cursor.getString(0);
+                        documents.put(uri, name == null || name.isEmpty() ? "Saved PDF" : name);
+                    }
+                } catch (RuntimeException ignored) {
+                    // The document may have moved or its provider may be unavailable.
+                }
+            }
+            return documents;
+        }, documents -> {
+            if (documents.isEmpty()) {
+                empty(body, "pdf", "No saved PDFs", "PDF exports you save from Paperwork appear here.");
+            }
+            documents.forEach((uri, name) -> {
+                body.addView(neutral(name, () -> openResult(uri, PDF_MIME)));
+                Ui.gap(body, 8);
+            });
+        });
     }
 
     private View card(int index) {
@@ -182,7 +228,7 @@ public final class MainActivity extends Activity {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
             lp.leftMargin = dp(9);
             bar.addView(name, lp);
-            bar.addView(neutral("Scanner", scanner::show));
+            bar.addView(neutral("Saved PDFs", this::savedPdfs));
         } else {
             TextView back = neutral("‹  Tools", this::home);
             bar.addView(back);
@@ -320,29 +366,34 @@ public final class MainActivity extends Activity {
             }
         } else if (code == SAVE_AS) {
             File export = pending;
+            String mime = pendingMime, message = pendingMessage;
             pending = null;
+            pendingMime = null;
+            pendingMessage = null;
             if (export == null) return;
             List<Uri> output = choices(data);
             if (result == RESULT_OK && output.size() == 1) {
-                if (inputUris.contains(output.get(0))) {
+                Uri uri = output.get(0);
+                if (inputUris.contains(uri)) {
                     export.delete();
                     notice("Choose a new destination to preserve the source file.");
                     return;
                 }
                 work("Saving your file…", () -> {
                     try (InputStream in = Files.newInputStream(export.toPath())) {
-                        try (OutputStream out = getContentResolver().openOutputStream(output.get(0), "wt")) {
+                        try (OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
                             if (out == null) throw new IOException("The selected folder is unavailable.");
                             transfer(in, out, Long.MAX_VALUE);
                         }
                     } finally {
                         export.delete();
                     }
-                    return pendingMessage;
-                }, message -> {
-                    pendingMessage = null;
-                    new AlertDialog.Builder(this).setTitle("Export complete").setMessage(message)
-                            .setPositiveButton("Done", null).setNeutralButton("Open file", (dialog, ignored) -> openResult(output.get(0)))
+                    return !PDF_MIME.equals(mime) || rememberPdf(uri, data.getFlags());
+                }, listed -> {
+                    String detail = listed ? message : message + " Open it from the folder you chose.";
+                    new AlertDialog.Builder(this).setTitle("Export complete").setMessage(detail)
+                            .setPositiveButton("Done", null)
+                            .setNeutralButton("Open file", (dialog, ignored) -> openResult(uri, mime))
                             .show();
                 });
             } else export.delete();
@@ -357,14 +408,27 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void openResult(Uri uri) {
-        String type = getContentResolver().getType(uri);
+    private boolean rememberPdf(Uri uri, int flags) {
+        int required = Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION;
+        try {
+            if ((flags & required) != required || DocumentsContract.isTreeUri(uri)
+                    || !DocumentsContract.isDocumentUri(this, uri)) return false;
+            getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            return true;
+        } catch (SecurityException | IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
+    private void openResult(Uri uri, String type) {
         Intent intent = new Intent(Intent.ACTION_VIEW).setDataAndType(uri, type == null ? "*/*" : type)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         try {
             startActivity(intent);
-        } catch (ActivityNotFoundException | SecurityException error) {
-            notice("No app can open this file type. The file was saved.");
+        } catch (ActivityNotFoundException error) {
+            notice("No app is installed to open this file type.");
+        } catch (SecurityException error) {
+            notice("This file is no longer accessible here. Check the folder where you saved it.");
         }
     }
 
@@ -381,6 +445,7 @@ public final class MainActivity extends Activity {
             }
         }, file -> {
             pending = file;
+            pendingMime = mime;
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
                     .setType(mime).putExtra(Intent.EXTRA_TITLE, filename);
             try {
@@ -388,6 +453,8 @@ public final class MainActivity extends Activity {
             } catch (ActivityNotFoundException error) {
                 file.delete();
                 pending = null;
+                pendingMime = null;
+                pendingMessage = null;
                 notice("The Android save dialog is unavailable.");
             }
         });

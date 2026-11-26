@@ -61,7 +61,7 @@ final class PdfWorkspace {
         LinearLayout body = app.screen(PdfTools.TITLES[tool], PdfTools.DESCRIPTIONS[tool]);
         boolean merge = "merge".equals(key), organize = "organize".equals(key);
         body.addView(app.primary(merge ? "Add PDFs" : sources.isEmpty() ? "Choose PDF" : "Change PDF",
-                () -> app.pick("application/pdf", merge, MainActivity.PICK_PDF)));
+                () -> app.pick(MainActivity.PDF_MIME, merge, MainActivity.PICK_PDF)));
         Ui.gap(body, 11);
         if (sources.isEmpty()) {
             app.empty(body, key, merge ? "Add at least two PDFs" : "Choose a PDF",
@@ -345,7 +345,7 @@ final class PdfWorkspace {
 
     private void export(PdfTools.Job job) {
         String ext = job.extension();
-        String mime = ".md".equals(ext) ? "text/markdown" : ".zip".equals(ext) ? "application/zip" : "application/pdf";
+        String mime = ".md".equals(ext) ? "text/markdown" : ".zip".equals(ext) ? "application/zip" : MainActivity.PDF_MIME;
         String original = job.inputs.get(0).name.replaceFirst("(?i)\\.pdf$", "");
         original = original.replaceAll("[\\p{Cntrl}/\\\\]", "_");
         app.makeOutput(original + "-" + job.key + ext, mime, output -> PdfTools.export(job, output));
